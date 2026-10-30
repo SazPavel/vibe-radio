@@ -1,0 +1,1517 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>🎧 vibe mode</title>
+<style>
+  :root {
+    --bg: #14171c;
+    --panel: #1c2027;
+    --border: #2c333d;
+    --text: #d7dde5;
+    --muted: #7d8794;
+    --accent: #4da3ff;
+    --ok: #3fb96f;
+    --warn: #d9a441;
+    --mono: ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.45 system-ui, "Segoe UI", sans-serif;
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 10px 20px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+  }
+  header h1 { font-size: 16px; margin: 0; letter-spacing: .5px; }
+  header .spacer { flex: 1; }
+  header a {
+    color: var(--muted);
+    text-decoration: none;
+    border: 1px solid transparent;
+    border-bottom: 2px solid transparent;
+    padding: 8px 16px;
+  }
+  header a:hover { color: var(--accent); border-bottom-color: var(--accent); }
+  #mutebtn, #ambbtn, #spacebtn {
+    background: transparent;
+    color: var(--muted);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font: 13px var(--mono);
+    padding: 6px 10px;
+    cursor: pointer;
+  }
+  #mutebtn.on { color: var(--ok); border-color: var(--ok); }
+  #ambbtn.on { color: var(--warn); border-color: var(--warn); }
+  #spacebtn.on { color: var(--accent); border-color: var(--accent); }
+  #vollow, #tempollow { display: flex; align-items: center; gap: 8px; color: var(--muted); font: 13px var(--mono); }
+  #vol, #tempo {
+    accent-color: var(--accent);
+    width: 100px;
+    cursor: pointer;
+  }
+  #tempoval { min-width: 36px; } /* чтобы подпись ×N не дёргала вёрстку */
+  #deck { display: flex; gap: 10px; align-items: center; justify-content: center; flex-wrap: wrap; }
+  #transport { display: flex; gap: 6px; }
+  #trackbar { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; max-width: 620px; }
+  #trackbar button, #transport button {
+    background: transparent;
+    color: var(--muted);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font: 13px var(--mono);
+    padding: 4px 10px;
+    cursor: pointer;
+  }
+  #trackbar button:hover, #transport button:hover { color: var(--accent); border-color: var(--accent); }
+  #trackbar button.on, #transport button.on { color: var(--accent); border-color: var(--accent); }
+
+  main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 18px;
+    padding: 24px;
+  }
+
+  #stage { position: relative; cursor: pointer; }
+  #coder {
+    font: 13px/1.2 var(--mono);
+    color: var(--text);
+    margin: 0;
+    animation: bob 1.6s ease-in-out infinite;
+    transform-origin: 50% 90%;
+    transition: opacity .16s;
+  }
+  @keyframes bob {
+    0%, 100% { transform: rotate(-1.1deg) translateY(0); }
+    50%      { transform: rotate(1.1deg) translateY(2px); }
+  }
+  .note {
+    position: absolute;
+    color: var(--accent);
+    font: 15px var(--mono);
+    pointer-events: none;
+    opacity: 0;
+    animation: floatup 3.2s ease-out forwards;
+  }
+  #dialog {
+    position: absolute;
+    left: 50%; top: 50%;
+    transform: translate(-50%, -50%);
+    margin: 0;
+    padding: 12px 16px;
+    background: var(--panel);
+    border: 1px solid var(--accent);
+    border-radius: 8px;
+    font: 12px/1.6 var(--mono);
+    color: var(--text);
+    white-space: pre;
+    box-shadow: 0 8px 28px rgba(0, 0, 0, .55);
+    pointer-events: none;
+  }
+  @keyframes floatup {
+    0%   { opacity: 0;   transform: translate(0, 0) rotate(0deg); }
+    15%  { opacity: .9; }
+    100% { opacity: 0;   transform: translate(28px, -110px) rotate(18deg); }
+  }
+  /* «меньше движения»: без покачиваний и летящих нот — только статичный вайб */
+  @media (prefers-reduced-motion: reduce) {
+    #coder { animation: none; }
+    .note { display: none; }
+  }
+
+  #eq {
+    font: 14px/1 var(--mono);
+    color: var(--ok);
+    white-space: pre;
+    letter-spacing: 2px;
+    min-height: 14px;
+  }
+  #nowplaying {
+    color: var(--warn);
+    font: 13px var(--mono);
+    min-height: 18px;
+    transition: opacity .35s;
+  }
+  #vibemeter {
+    font: 13px var(--mono);
+    color: var(--muted);
+    min-height: 18px;
+    letter-spacing: 1px;
+  }
+  #trackprogress {
+    color: var(--muted);
+    font: 12px var(--mono);
+    letter-spacing: 1px;
+    min-height: 16px;
+  }
+  #stats {
+    color: var(--muted);
+    font: 12px var(--mono);
+    text-align: center;
+    max-width: 560px;
+  }
+  /* затемнение после BYE: свет гаснет плавно, подсказка проступает следом */
+  #blackout {
+    position: fixed;
+    inset: 0;
+    z-index: 10;
+    background: #04060a;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 2.4s ease;
+  }
+  #blackout.on { opacity: 1; pointer-events: auto; }
+  #blackout span {
+    color: #39414d;
+    font: 13px var(--mono);
+    opacity: 0;
+    transition: opacity 1.2s ease 2.2s; /* загорается, когда свет уже погас */
+  }
+  #blackout.on span { opacity: 1; }
+  /* «меньше движения» — без затяжного фейда, гаснем сразу */
+  @media (prefers-reduced-motion: reduce) {
+    #blackout { transition: none; }
+    #blackout span { transition-delay: .3s; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>🎧 vibe mode</h1>
+  <div class="spacer"></div>
+  <label id="vollow" title="громкость">🔉<input id="vol" type="range" min="0" max="1" step="0.02" value="0.5"></label>
+  <label id="tempollow" title="темп: множитель к BPM дорожки, применяется на лету">🥁<input id="tempo" type="range" min="0.5" max="1.5" step="0.05" value="1"><span id="tempoval">×1</span></label>
+  <button id="mutebtn" title="вайб-звук: вкл/выкл (Space)">🔇 тишина</button>
+  <button id="ambbtn" title="эмбиент: дождь + потрескивание винила (A)">🌧 эмбиент</button>
+  <button id="spacebtn" title="объём: лёгкий стерео-пан перкуссии (D)">🌌 объём</button>
+</header>
+
+<main>
+  <div id="stage"><pre id="coder"></pre></div>
+  <div id="eq"></div>
+  <div id="vibemeter" title="уровень вайба — RMS живого сигнала анализатора"></div>
+  <div id="nowplaying"></div>
+  <div id="trackprogress" title="сколько играем этот трек и когда следующий"></div>
+  <div id="deck">
+    <div id="transport">
+      <button id="prevbtn" title="предыдущая дорожка">⏮</button>
+      <button id="shufflebtn" title="перемешать: вкл/выкл">🔀</button>
+      <button id="nextbtn" title="следующая дорожка">⏭</button>
+    </div>
+    <div id="trackbar"></div>
+  </div>
+  <div id="stats">
+    INVITE sip:vibe@sip.local → 200 OK (a=music:sendrecv)<br>
+    RTP не открывается никогда — это инвариант. Вайб проходит только сигнализацией.<br>
+    клик по вайбкодеру — следующий арт; первый клик включает плейлист со случайной дорожкой,<br>
+    кнопки-номера — играть выбранную (автоплей без жеста пользователя браузер запрещает)<br>
+    · Space — вайб, ←/→ — арты, ↑/↓ — громкость, 1–0 — дорожки, n/p — трек, s — перемешать, a — эмбиент, d — объём<br>
+    · долгое нажатие на кодер — как устанавливается вайб, b или :wq — как завершается
+  </div>
+</main>
+
+<div id="blackout"><span>· BYE доставлен · клик — вернуть свет ·</span></div>
+
+<script>
+"use strict";
+
+// Бородатые вайбкодеры в наушниках. Только ASCII, только хардкор.
+// Арты одной серии: при заходе — случайный, клик по кодеру листает.
+const ARTS = [
+  [ // классика: кивает в такт
+    "                      ♪",
+    "          ♫                                ♪",
+    "                 .---------.",
+    "              .-'           '-.",
+    "             /   .--------.   \\",
+    "            |  .'          '.  |",
+    "        .--.|  |   o    o   |  |.--.",
+    "       /====|  |    \\||/    |  |====\\",
+    "       |====|  |            |  |====|",
+    "       \\====|  |~~~~~~~~~~~~|  |====/",
+    "        '--.|  |~~~~~~~~~~~~|  |.--'",
+    "            |  |~~~~~~~~~~~~|  |",
+    "             \\ |~~~~~~~~~~~~| /",
+    "              ||~~~~~~~~~~~~||",
+    "              ||~~~~~~~~~~~~||",
+    "               \\~~~~~~~~~~~~/",
+    "                '---------'",
+  ],
+  [ // кайфует и подпевает: a=vibes: sendrecv
+    "                        ♪",
+    "            ♫                                ♪",
+    "                   .---------.",
+    "                .-'           '-.",
+    "               /   .--------.   \\",
+    "              |  .'          '.  |",
+    "          .--.|  |   u    u   |  |.--.",
+    "         /====|  |    \\||/    |  |====\\",
+    "         |====|  |    \\o/     |  |====|",
+    "         \\====|  |~~~~~~~~~~~~|  |====/",
+    "          '--.|  |~~~~~~~~~~~~|  |.--'",
+    "              |  |~~~~~~~~~~~~|  |",
+    "               \\ |~~~~~~~~~~~~| /",
+    "                ||~~ ~~ ~~~ ~~||",
+    "                ||~~~~~~~~~~~~||",
+    "                || ~~~~~~~~~~ ||",
+    "                 \\~~~~~~~~~~~~/",
+    "       _______    '---------'   _______",
+    "      /       \\_______________ /        \\",
+    "     |   ___   |  a=vibes:     |   ___   |",
+    "     |  /   \\  |   sendrecv    |  /   \\  |",
+    "      \\_|___|_/                 \\_|___|_/",
+  ],
+  [ // рабочее место: if vibe == True: deploy()
+    "                     ♫              ♪",
+    "          ♫                                ♪",
+    "                 .---------.",
+    "              .-'           '-.",
+    "             /   .--------.   \\",
+    "            |  .'          '.  |",
+    "        .--.|  |   o    o   |  |.--.",
+    "       /====|  |    \\||/    |  |====\\",
+    "       |====|  |    \\__/    |  |====| ",
+    "       \\====|  |~~~~~~~~~~~~|  |====/ ",
+    "        '--.|  |~~~~~~~~~~~~|  |.--'  ",
+    "       d    |  |~~ ~~~~~ ~~~|  |    b",
+    "             \\ |~~~~~~~~~~~~| /",
+    "              ||~~~~~~~~~~~~||",
+    "               \\~~~~~~~~~~~~/",
+    "                |__________|",
+    "       .---------------------.",
+    "       |  __________________  |",
+    "       | |  if vibe == True:| |",
+    "       | |      deploy()    | |",
+    "       | |      deploy()    | |",
+    "       | |      deploy()  # | |",
+    "       | |__________________| |",
+    "       |______________________|",
+    "        \\____________________/",
+  ],
+  [ // нейросеть-диджей: «причёска» из нейронов, на вертушках — минибатчи, loss падает
+    "                     ♪",
+    "          ♫                                ♪",
+    "            ·o~o~.    .o~o~.       .o~o·",
+    "           /     \\  ~/      \\~~~/~~/    \\",
+    "          o       o~        o          o",
+    "           \\    /   \\     /  \\    /",
+    "            o~~o     o~~~o    o~~o",
+    "                 .---------.",
+    "              .-'           '-.",
+    "             /   .--------.   \\",
+    "            |  .'          '.  |",
+    "        .--.|  |   o    o   |  |.--.",
+    "       /====|  |    \\||/    |  |====\\",
+    "       |====|  |   ai.ai    |  |====|",
+    "       \\====|  |~~~~~~~~~~~~|  |====/",
+    "        '--.|  |~~~~~~~~~~~~|  |.--'",
+    "            |  |~~~~~~~~~~~~|  |",
+    "             \\ |~~~~~~~~~~~~| /",
+    "              ||~~~~~~~~~~~~||",
+    "              ||~~~~~~~~~~~~||",
+    "               \\~~~~~~~~~~~~/",
+    "                '---------'",
+    "        .-.    .------------.    .-.",
+    "       ( o )===[ loss 0.042 ]===( o )",
+    "        '-'    '------------'    '-'",
+  ],
+  [ // lo-fi у окна: кот (=^.^=), кружка с паром, деплой под биты
+    "                      ♪",
+    "          ♫                                ♪",
+    "                 .---------.",
+    "              .-'           '-.",
+    "             /   .--------.   \\",
+    "            |  .'          '.  |",
+    "        .--.|  |   o    o   |  |.--.       ·    ·    ·",
+    "       /====|  |    \\||/    |  |====\\   ·        ·",
+    "       |====|  |    \\__/    |  |====|     ·   /\\_/\\  ·",
+    "       \\====|  |~~~~~~~~~~~~|  |====/        (=^.^=)",
+    "        '--.|  |~~~~~~~~~~~~|  |.--'  ·      ===========",
+    "            |  |~~~~~~~~~~~~|  |",
+    "             \\ |~~~~~~~~~~~~| /   ·",
+    "              ||~~~~~~~~~~~~||",
+    "              ||~~~~~~~~~~~~||            ·",
+    "               \\~~~~~~~~~~~~/    lo-fi beats to deploy to",
+    "                '---------'",
+    "         ~ ~",
+    "        .---.",
+    "       (    ))",
+    "        '---'",
+  ],
+  [ // рот на молнии: re-INVITE a=sendonly — только слушает, не говорит
+    "                      ♪",
+    "          ♫                                ♪",
+    "                 .---------.",
+    "              .-'           '-.",
+    "             /   .--------.   \\",
+    "            |  .'          '.  |",
+    "        .--.|  |   -    -   |  |.--.   «hold my beer,",
+    "       /====|  | |-|-|-|-|  |  |====\\   re-INVITING»",
+    "       |====|  | |=|=|=|=|  |  |====|     (a=sendonly)",
+    "       \\====|  |~~~~~~~~~~~~|  |====/          ___",
+    "        '--.|  |~~~~~~~~~~~~|  |.--'          |   |)",
+    "            |  |~~~~~~~~~~~~|  |              |~~~|)",
+    "             \\ |~~~~~~~~~~~~| /               |___|)",
+    "              ||~~~~~~~~~~~~||",
+    "              ||~~~~~~~~~~~~||",
+    "               \\~~~~~~~~~~~~/",
+    "                '---------'",
+  ],
+  [ // призрак 404: диалог умер, а вайб — доставлен
+    "                  ░ ♪ ░",
+    "       ♫ ░                          ░ ♪",
+    "                 .---------.",
+    "              .-'           '-.",
+    "             /   .--------.   \\",
+    "            |  .'          '.  |",
+    "        .--.|  |   x    x   |  |.--.",
+    "       /====|  |    (   )   |  |====\\    404 Not Found,",
+    "       |====|  |            |  |====|    но вайб уже",
+    "       \\====|  |~~~~~~~~~~~~|  |====/       доставлен <3",
+    "        '--.|  |~~~~~~~~~~~~|  |.--'",
+    "            |  |~~~~~~~~~~~~|  |",
+    "             \\ |~~~~~~~~~~~~| /",
+    "              ||~~~~~~~~~~~~||",
+    "              ||~~~~~~~~~~~~||",
+    "              ||~~  ~~~  ~~~||",
+    "              ~~ ~~ ~~ ~~ ~~",
+    "             ~ ~~ ~~  ~~ ~ ~~  ░",
+    "          ░   ~  ~~ ~~  ~ ~",
+  ],
+  [ // hole punching в NAT: кулак в дыре, из-под стены — 200 OK
+    "                      ♪",
+    "          ♫                                ♪",
+    "                 .---------.",
+    "              .-'           '-.",
+    "             /   .--------.   \\        .----------------------.",
+    "            |  .'          '.  |       |         N A T        |",
+    "        .--.|  |   o    o   |  |.--.   |  ·           ·       |",
+    "       /====|  |    \\o_/    |  |====\\  |     .---.         ·  |",
+    "       |====|  |            |  |====|  |  ====( O )====>   ·  |",
+    "       \\====|  |~~~~~~~~~~~~|  |====/  |    '-'         ·     |",
+    "        '--.|  |~~~~~~~~~~~~|  |.--'   |     ·      200 OK!   |",
+    "            |  |~~~~~~~~~~~~|  |       |      ·      ·        |",
+    "             \\ |~~~~~~~~~~~~| /        |  ·           ·       |",
+    "              ||~~~~~~~~~~~~||         .----------------------.",
+    "              ||~~~~~~~~~~~~||          welcome to the NAT",
+    "               \\~~~~~~~~~~~~/",
+    "                '---------'",
+  ],
+].map((a) => a.join("\n"));
+
+// ─── Память вайба ───
+// Громкость, состояние звука, перемешка, дорожка и арт переживают перезагрузку.
+// Приватный режим/заблокированный storage — тихо живём без памяти.
+const STORE_KEY = "vibe.state.v1";
+let saved = {};
+try { saved = JSON.parse(localStorage.getItem(STORE_KEY)) || {}; } catch { saved = {}; }
+const num = (v, min, max, dflt) => typeof v === "number" && v >= min && v <= max ? v : dflt;
+// «Намерение» пользователя, а не текущий техногенный статус: vibeWanted/ambWanted
+// меняются только реальным стартом/стопом, lastTrack — реальным выбором дорожки.
+// Иначе первая отрисовка при загрузке стёрла бы восстановленные значения нулями.
+let vibeWanted = !!saved.vibe, ambWanted = !!saved.amb, lastTrack = num(saved.track, 0, 1e9, null);
+function saveState() {
+  try {
+    localStorage.setItem(STORE_KEY, JSON.stringify({
+      vol: volume, tempo: tempoScale, shuffle, track: lastTrack, art: artIdx, amb: ambWanted, vibe: vibeWanted, space: spaceOn,
+    }));
+  } catch { /* storage недоступен — не запоминаем */ }
+}
+
+const coder = document.getElementById("coder");
+const stage = document.getElementById("stage");
+let artIdx = num(saved.art, 0, ARTS.length - 1, Math.floor(Math.random() * ARTS.length)); // сохранённый арт, при первом заходе — случайный
+function showArt(fade) {
+  const paint = () => {
+    coder.textContent = ARTS[artIdx]; coder.style.opacity = 1;
+    saveState();
+  };
+  if (!fade) { paint(); return; }
+  coder.style.opacity = 0;
+  setTimeout(paint, 160); // короткий фейд, bob-анимацию не трогает
+}
+// первый рендер арта — в конце скрипта, когда инициализирована память (showArt → saveState)
+
+function nextArt() { artIdx = (artIdx + 1) % ARTS.length; showArt(true); }
+function prevArt() { artIdx = (artIdx - 1 + ARTS.length) % ARTS.length; showArt(true); }
+stage.addEventListener("click", () => {
+  if (eggBusy) return; // пасхалка не должна листаться кликом
+  nextArt();
+  if (!musicOn) startMusic(); // первый клик = жест пользователя, autoplay разрешён; при одном амбиенте — включает музыку
+});
+
+// ─── Синтези-плейлист на Web Audio ───
+// Аудиофайлов нет: каждый трек целиком синтезируется из осцилляторов и шума,
+// поэтому страница остаётся одним файлом внутри //go:embed. Это UI-звук,
+// RTP и сигнализацию стенда он не касается.
+// Трек = bpm + сетка (meter — 16-е ноты в такте, 5/4 = 20) + прогрессия по
+// аккорду на такт + pattern(t, s, pos, bar, ch, tr) — что играть на шаге сетки.
+// После loops полных проходов прогрессии включается следующий трек.
+const LOOKAHEAD = 0.12;      // сек: планируем события чуть заранее
+const PLAYLIST = [
+  { // вечнозелёный лоу-фай: Am7 → Fmaj7 → Dm7 → E7alt
+    title: "lo-fi beats to deploy to", bpm: 72, meter: 16, swing: true, loops: 3,
+    chords: [
+      { bass: 110.00, pad: [220.00, 261.63, 329.63, 392.00] },
+      { bass: 87.31,  pad: [174.61, 220.00, 261.63, 329.63] },
+      { bass: 73.42,  pad: [146.83, 220.00, 261.63, 349.23] },
+      { bass: 82.41,  pad: [164.81, 207.65, 246.94, 311.13] },
+    ],
+    pattern(t, s, pos, bar, ch, tr) {
+      if (pos === 0) pad(t, ch.pad, tr.stepDur * tr.meter * 0.95);
+      if (pos % 8 === 0) { kick(t); bass(t, ch.bass); } // бочка на 1 и 3
+      if (pos % 8 === 4) snare(t);                       // рабочий на 2 и 4
+      if (pos % 2 === 0 || Math.random() < 0.25) hat(t, pos % 4 === 0 ? 0.09 : 0.045);
+    },
+  },
+  { // фанковый грув на 110: бас-синкопа рулит, пэдов нет
+    title: "Another One Bites the Timer (Session-Expires: 110)", bpm: 110, meter: 16, swing: false, loops: 5,
+    chords: [
+      { bass: 110.00 },  // Am
+      { bass: 87.31 },   // F
+      { bass: 65.41 },   // C
+      { bass: 98.00 },   // G
+    ],
+    pattern(t, s, pos, bar, ch, tr) {
+      for (const p of [0, 3, 6, 8, 11, 14]) bass(t, p === 6 || p === 14 ? ch.bass * 1.5 : ch.bass);
+      if (pos === 0 || pos === 10) kick(t);
+      if (pos === 4 || pos === 12) snare(t);
+      if (pos % 2 === 0) hat(t, pos % 4 === 0 ? 0.075 : 0.04);
+    },
+  },
+  { // 5/4 в честь Brubeck: Ebm7 → B7, рифф из шести басовых нот
+    title: "Take Five (5 Contacts, Same AOR)", bpm: 172, meter: 20, swing: false, loops: 10,
+    chords: [
+      { bass: 77.78, pad: [155.56, 185.00, 233.08, 277.18] }, // Ebm7
+      { bass: 61.74, pad: [123.47, 246.94, 311.13, 369.99] }, // B7
+    ],
+    pattern(t, s, pos, bar, ch, tr) {
+      if (pos === 0) pad(t, ch.pad, tr.stepDur * tr.meter * 0.9, 0.05);
+      for (const p of [0, 3, 5, 10, 13, 15]) bass(t, p === 5 || p === 15 ? ch.bass * 1.5 : ch.bass);
+      if (pos % 4 === 0) hat(t, pos === 0 || pos === 12 ? 0.07 : 0.03); // «райдер» по четвертям
+      if (pos === 12) snare(t);
+    },
+  },
+  { // баллада на 60: редкие переборы pluck поверх медленных пэдов
+    title: "Hello Darkness, My Old Friend (RTP Timeout Mix)", bpm: 60, meter: 16, swing: false, loops: 3,
+    chords: [
+      { bass: 110.00, pad: [220.00, 261.63, 329.63, 392.00] },  // Am
+      { bass: 87.31,  pad: [174.61, 220.00, 261.63, 329.63] },  // F
+      { bass: 65.41,  pad: [196.00, 261.63, 329.63, 392.00] },  // C
+      { bass: 98.00,  pad: [196.00, 246.94, 293.66, 392.00] },  // G
+    ],
+    // мелодия: {s — шаг внутри 4-тактового цикла, f — нота}
+    melody: [
+      { s: 2, f: 440.00 }, { s: 6, f: 523.25 }, { s: 10, f: 659.25 }, { s: 14, f: 587.33 },
+      { s: 18, f: 440.00 }, { s: 24, f: 523.25 }, { s: 28, f: 349.23 },
+      { s: 34, f: 392.00 }, { s: 40, f: 440.00 }, { s: 46, f: 587.33 },
+      { s: 50, f: 587.33 }, { s: 56, f: 493.88 }, { s: 62, f: 392.00 },
+    ],
+    pattern(t, s, pos, bar, ch, tr) {
+      if (pos === 0) { pad(t, ch.pad, tr.stepDur * tr.meter * 0.95, 0.05); bass(t, ch.bass); }
+      if (pos === 8) bass(t, ch.bass * 2);
+      if (pos % 4 === 2) hat(t, 0.035); // «щётки»
+      const m = tr.melody.find((n) => n.s === s);
+      if (m) pluck(t, m.f);
+    },
+  },
+  { // «никто не берёт»: короткие гудки 440+480 поверх минорного грува
+    title: "Ringin' 180 (No Answer Mix)", bpm: 96, meter: 16, swing: false, loops: 8,
+    chords: [
+      { bass: 73.42, pad: [146.83, 174.61, 220.00, 261.63] }, // Dm
+      { bass: 58.27, pad: [116.54, 174.61, 233.08, 293.66] }, // Bb
+    ],
+    pattern(t, s, pos, bar, ch, tr) {
+      if (pos === 0) pad(t, ch.pad, tr.stepDur * tr.meter * 0.9, 0.05);
+      if (pos === 2 || pos === 10) ring(t); // «аллё?... аллё?»
+      if (pos === 0 || pos === 8) { kick(t); bass(t, ch.bass); }
+      if (pos === 12) snare(t);
+      if (pos % 4 === 2) hat(t, 0.05);
+    },
+  },
+  { // гипнотический арпеджио-поп: зацикленный перебор pluck без пауз, как keepalive
+    title: "Every Breath You Take (Every OPTIONS Keepalive)", bpm: 117, meter: 16, swing: false, loops: 5,
+    chords: [
+      { bass: 110.00, pad: [440.00, 523.25, 659.25, 880.00] }, // Am
+      { bass: 87.31,  pad: [349.23, 440.00, 523.25, 698.46] }, // F
+      { bass: 65.41,  pad: [329.63, 392.00, 523.25, 659.25] }, // C
+      { bass: 98.00,  pad: [392.00, 493.88, 587.33, 783.99] }, // G
+    ],
+    pattern(t, s, pos, bar, ch, tr) {
+      const RIFF = [0, 1, 2, 3, 2, 1, 2, 3]; // восьмые: вверх-вниз по аккорду, повторять вечно
+      if (pos % 2 === 0) pluck(t, ch.pad[RIFF[(pos / 2) % 8]]);
+      if (pos === 0 || pos === 8) { kick(t); bass(t, ch.bass); }
+      if (pos === 4 || pos === 12) snare(t);
+      if (pos % 4 === 2) hat(t, 0.04);
+    },
+  },
+  { // панк на 170: «бой» power chord'ами восьмыми, в последнем такте — сбивка
+    title: "I Fought the 403 (and the 403 Won)", bpm: 170, meter: 16, swing: false, loops: 7,
+    chords: [
+      { bass: 65.41 }, // C
+      { bass: 87.31 }, // F
+      { bass: 98.00 }, // G
+      { bass: 98.00 }, // G — держим до сбивки
+    ],
+    pattern(t, s, pos, bar, ch, tr) {
+      const fill = bar === 3; // последний такт цикла — сбивка
+      if (pos % 2 === 0 || (fill && pos % 2 === 1)) stab(t, ch.bass * 2);
+      if (pos % 8 === 0) { kick(t); bass(t, ch.bass); }
+      if (pos === 4 || pos === 12 || (fill && pos === 14)) snare(t);
+    },
+  },
+  { // вечнозелёный вамп Cm–G7: ходячий бас, щётки, аккорцевые «выкрики» на синкопе
+    title: "Hit the Road Jack (406 Reroute, Cause-List Edit)", bpm: 112, meter: 16, swing: true, loops: 9,
+    chords: [
+      { bass: 130.81, walk: [130.81, 116.54, 103.83, 98.00], pad: [261.63, 311.13, 392.00] }, // Cm: C Bb Ab G
+      { bass: 98.00,  walk: [98.00, 110.00, 123.47, 130.81], pad: [196.00, 246.94, 349.23] }, // G7: подъём обратно к Cm
+    ],
+    pattern(t, s, pos, bar, ch, tr) {
+      if (pos % 4 === 0) bass(t, ch.walk[pos / 4]); // бас Мартина, шаг на каждую четверть
+      if (pos === 0) kick(t);
+      if (pos === 8) snare(t);
+      if (pos % 2 === 0) hat(t, 0.04);              // «щётки» со свингом
+      if (pos === 4 || pos === 11) for (const f of ch.pad) pluck(t, f); // «hit the road… / …Jack!»
+    },
+  },
+  { // диско four-on-the-floor: восьмой бас-остинато и стаккатные «стринги» на 2 и 4
+    title: "Smooth Criminal (µ-law → a-law → G.729)", bpm: 118, meter: 16, swing: false, loops: 5,
+    chords: [
+      { bass: 110.00, riff: [220.00, 220.00, 261.63, 329.63, 440.00, 329.63, 261.63, 220.00], pad: [440.00, 523.25, 659.25] },  // Am
+      { bass: 110.00, riff: [220.00, 220.00, 261.63, 329.63, 440.00, 329.63, 261.63, 220.00], pad: [440.00, 523.25, 659.25] },  // Am
+      { bass: 87.31,  riff: [174.61, 174.61, 220.00, 261.63, 349.23, 261.63, 220.00, 174.61], pad: [349.23, 440.00, 523.25] },  // F
+      { bass: 82.41,  riff: [164.81, 164.81, 196.00, 246.94, 329.63, 246.94, 196.00, 164.81], pad: [329.63, 415.30, 493.88] },  // E — андалузский заход
+    ],
+    pattern(t, s, pos, bar, ch, tr) {
+      if (pos % 2 === 0) bass(t, ch.riff[(pos / 2) % 8]); // мотор из восьмых, без пауз
+      if (pos % 4 === 0) kick(t);                   // четыре по полу
+      if (pos % 4 === 2) hat(t, 0.07);              // «открытый» хэт на офбифе
+      if (pos === 4 || pos === 12) for (const f of ch.pad) pluck(t, f); // стаккато-стринги
+    },
+  },
+  { // сёрф-рок на 140: pluck-«дзинь» со pentatonic lick, драйвовый рабочий
+    title: "The Proxy Rides — 407 Auth Required", bpm: 140, meter: 16, swing: false, loops: 6,
+    chords: [
+      { bass: 82.41,  pad: [164.81, 196.00, 246.94] },  // Em
+      { bass: 98.00,  pad: [196.00, 246.94, 293.66] },  // G
+      { bass: 65.41,  pad: [196.00, 261.63, 329.63] },  // C
+      { bass: 73.42,  pad: [146.83, 174.61, 220.00] },  // Dm
+    ],
+    // гитарный lick: ми-минорная пентатоника
+    melody: [
+      { s: 0, f: 659.25 }, { s: 2, f: 587.33 }, { s: 4, f: 493.88 }, { s: 6, f: 440.00 },
+      { s: 8, f: 392.00 }, { s: 12, f: 440.00 },
+      { s: 16, f: 493.88 }, { s: 18, f: 587.33 }, { s: 20, f: 659.25 },
+      { s: 24, f: 783.99 }, { s: 28, f: 659.25 },
+    ],
+    pattern(t, s, pos, bar, ch, tr) {
+      if (pos % 4 === 0) { kick(t); bass(t, ch.bass); }
+      if (pos === 4 || pos === 12) snare(t);
+      if (pos % 2 === 1) hat(t, 0.035);
+      const m = tr.melody.find((n) => n.s === s);
+      if (m) pluck(t, m.f);
+    },
+  },
+  { // баблгам-поп на 138: бочка на все четыре, бас с офбита и pluck-«выстрелы»
+    title: "BYE Bye Bye (*NSYNC cover)", bpm: 138, meter: 16, swing: false, loops: 5,
+    chords: [
+      { bass: 130.81, pad: [261.63, 311.13, 392.00] },  // Cm
+      { bass: 103.83, pad: [207.65, 261.63, 311.13] },  // Ab
+      { bass: 77.78,  pad: [155.56, 196.00, 233.08] },  // Eb
+      { bass: 87.31,  pad: [174.61, 220.00, 261.63] },  // F
+    ],
+    pattern(t, s, pos, bar, ch, tr) {
+      if (pos % 4 === 0) kick(t);                              // четыре по полу
+      if (pos % 4 === 2) hat(t, 0.07);                         // открытый хэт на офбифе
+      if (pos % 2 === 1) bass(t, ch.bass);                     // бас с «изнанки»
+      if (pos === 0 || pos === 8) bass(t, ch.bass * 2);
+      if (pos === 4 || pos === 12) snare(t);
+      if (pos % 2 === 0) for (const f of ch.pad) pluck(t, f);  // аккордовые «выстрелы» бой-бэнда
+    },
+  },
+  { // синти-поп 80-х на 120: офбифтный синт-бас и бегущий арпеджио-перебор
+    title: "Call Me Maybe (486 Busy Remix)", bpm: 120, meter: 16, swing: false, loops: 4,
+    chords: [
+      { bass: 116.54, pad: [233.08, 293.66, 349.23] },  // Bb
+      { bass: 98.00,  pad: [196.00, 246.94, 293.66] },  // Gm
+      { bass: 77.78,  pad: [155.56, 196.00, 233.08] },  // Eb
+      { bass: 87.31,  pad: [174.61, 220.00, 261.63] },  // F
+    ],
+    pattern(t, s, pos, bar, ch, tr) {
+      const ARP = [0, 1, 2, 1];
+      if (pos % 2 === 0) pluck(t, ch.pad[ARP[(pos / 2) % 4]]);
+      if (pos % 4 === 2) { bass(t, ch.bass); hat(t, 0.06); }  // синт-бас на офбифе + открытый хэт
+      if (pos === 0) bass(t, ch.bass * 2);
+      if (pos % 4 === 0) kick(t);
+      if (pos === 4 || pos === 12) snare(t);
+    },
+  },
+  { // акустическая баллада на 86: пальцевой перебор — «Unchained Melody по MD5»
+    title: "Digest of the Heart (MD5 Acoustic)", bpm: 86, meter: 16, swing: false, loops: 3,
+    chords: [
+      { bass: 110.00, pad: [220.00, 261.63, 329.63, 392.00] },  // Am
+      { bass: 87.31,  pad: [174.61, 220.00, 261.63, 329.63] },  // F
+      { bass: 65.41,  pad: [196.00, 261.63, 329.63, 392.00] },  // C
+      { bass: 98.00,  pad: [196.00, 246.94, 293.66, 392.00] },  // G
+    ],
+    pattern(t, s, pos, bar, ch, tr) {
+      const PICK = [0, 2, 3, 1, 2, 3, 2, 1];  // трэвис-пикинг по аккорду
+      if (pos % 4 === 0) bass(t, ch.bass);
+      if (pos % 2 === 0) pluck(t, ch.pad[PICK[(pos / 2) % 8]]);
+      if (pos === 8) hat(t, 0.03);            // единственный «удар щёточкой» на такт
+    },
+  },
+  { // соул-баллада со свингом: Dm7→G7→Cmaj7→A7, певучая pluck-линия поверх пэдов
+    title: "CANCEL My Love (487 Edit)", bpm: 84, meter: 16, swing: true, loops: 4,
+    chords: [
+      { bass: 73.42,  pad: [146.83, 174.61, 220.00, 261.63] },  // Dm7
+      { bass: 98.00,  pad: [196.00, 246.94, 293.66, 349.23] },  // G7
+      { bass: 65.41,  pad: [164.81, 196.00, 246.94, 329.63] },  // Cmaj7
+      { bass: 110.00, pad: [220.00, 277.18, 329.63] },          // A7
+    ],
+    // вокальная линия на весь 4-тактовый цикл
+    melody: [
+      { s: 3, f: 587.33 }, { s: 8, f: 493.88 }, { s: 12, f: 440.00 },
+      { s: 19, f: 392.00 }, { s: 26, f: 440.00 }, { s: 32, f: 587.33 },
+      { s: 40, f: 659.25 }, { s: 47, f: 587.33 }, { s: 52, f: 493.88 },
+      { s: 58, f: 440.00 }, { s: 62, f: 523.25 },
+    ],
+    pattern(t, s, pos, bar, ch, tr) {
+      if (pos === 0) pad(t, ch.pad, tr.stepDur * tr.meter * 0.9, 0.05);
+      if (pos === 0 || pos === 8) bass(t, ch.bass);
+      if (pos % 4 === 2) hat(t, 0.035);   // щётки
+      if (pos === 10) snare(t);
+      const m = tr.melody.find((n) => n.s === s);
+      if (m) pluck(t, m.f);
+    },
+  },
+  { // фолк-поп на 98: зацикленный pluck и кахон, стандартная поп-четвёрка
+    title: "404 Not Found (But I'm Still Here)", bpm: 98, meter: 16, swing: true, loops: 4,
+    chords: [
+      { bass: 65.41,  pad: [196.00, 261.63, 329.63] },  // C
+      { bass: 98.00,  pad: [196.00, 246.94, 293.66] },  // G
+      { bass: 110.00, pad: [220.00, 261.63, 329.63] },  // Am
+      { bass: 87.31,  pad: [174.61, 220.00, 261.63] },  // F
+    ],
+    pattern(t, s, pos, bar, ch, tr) {
+      const PICK = [0, 2, 1, 2];
+      if (pos % 2 === 0) pluck(t, ch.pad[PICK[(pos / 2) % 4]]);
+      if (pos === 0 || pos === 8) { kick(t); bass(t, ch.bass); }
+      if (pos === 12) snare(t);            // «хлопок» по кахону
+      if (pos % 4 === 2) hat(t, 0.035);
+    },
+  },
+  { // медленный соул-блюз на 72: зов и ответ двух 3xx-кодов
+    title: "380 Alternative Service (feat. 410 Gone)", bpm: 72, meter: 16, swing: true, loops: 4,
+    chords: [
+      { bass: 73.42,  pad: [146.83, 174.61, 220.00] },  // Dm
+      { bass: 98.00,  pad: [196.00, 233.08, 293.66] },  // Gm
+      { bass: 87.31,  pad: [174.61, 220.00, 261.63] },  // F
+      { bass: 110.00, pad: [220.00, 277.18, 329.63] },  // A
+    ],
+    pattern(t, s, pos, bar, ch, tr) {
+      if (pos === 0) pad(t, ch.pad, tr.stepDur * tr.meter * 0.9, 0.05);
+      if (pos === 0 || pos === 8) { bass(t, ch.bass); kick(t); }
+      if (pos % 4 === 2) hat(t, 0.04);
+      if (pos === 6) snare(t);
+      if (pos === 2 || pos === 4) pluck(t, ch.pad[2]);           // «380 говорит…»
+      if (pos === 12) for (const f of ch.pad) pluck(t, f);       // «…410 отвечает»
+    },
+  },
+  { // регги one-drop на 76: вся тяжесть на сильную 3-ю, ска-стэки на офбитах
+    title: "Hold My Beer (re-INVITE a=sendonly)", bpm: 76, meter: 16, swing: true, loops: 5,
+    chords: [
+      { bass: 110.00, pad: [220.00, 261.63, 329.63] },  // Am
+      { bass: 65.41,  pad: [196.00, 261.63, 329.63] },  // C
+      { bass: 87.31,  pad: [174.61, 220.00, 261.63] },  // F
+      { bass: 98.00,  pad: [196.00, 246.94, 293.66] },  // G
+    ],
+    pattern(t, s, pos, bar, ch, tr) {
+      if (pos % 4 === 2) stab(t, ch.bass * 2);          // «скэнк» на слабых долях
+      if (pos === 8) { kick(t); snare(t); }             // one-drop
+      if (pos === 0 || pos === 10) bass(t, ch.bass);    // ленивый бас
+    },
+  },
+  { // фанк-поп на 128: четыре по полу и клавинетные pluck'и — солнце над вызовом
+    title: "On Top of the World (200 OK with SDP)", bpm: 128, meter: 16, swing: false, loops: 5,
+    chords: [
+      { bass: 98.00,  pad: [196.00, 246.94, 293.66] },  // G
+      { bass: 82.41,  pad: [164.81, 196.00, 246.94] },  // Em
+      { bass: 65.41,  pad: [196.00, 261.63, 329.63] },  // C
+      { bass: 73.42,  pad: [146.83, 185.00, 220.00] },  // D
+    ],
+    pattern(t, s, pos, bar, ch, tr) {
+      const CLAV = { 3: 2, 6: 0, 10: 1, 13: 0 };        // клавинет на синкопах
+      if (pos in CLAV) pluck(t, ch.pad[CLAV[pos]]);
+      if (pos % 4 === 0) kick(t);                       // четыре по полу
+      if (pos % 4 === 2) { bass(t, ch.bass); hat(t, 0.07); } // офбифтный бас + открытый хэт
+      if (pos === 0) bass(t, ch.bass * 2);
+      if (pos === 4 || pos === 12) snare(t);
+    },
+  },
+  { // пиано-рок-буги на 168: октавный бас и рояльные «тычки» — Элтон бодрится
+    title: "I'm Still Standing (Re-REGISTER)", bpm: 168, meter: 16, swing: false, loops: 6,
+    chords: [
+      { bass: 82.41,  pad: [164.81, 207.65, 246.94] },  // E
+      { bass: 69.30,  pad: [138.59, 164.81, 207.65] },  // C#m
+      { bass: 110.00, pad: [220.00, 277.18, 329.63] },  // A
+      { bass: 123.47, pad: [246.94, 311.13, 369.99] },  // B
+    ],
+    pattern(t, s, pos, bar, ch, tr) {
+      if (pos % 4 === 0) bass(t, ch.bass);
+      if (pos % 4 === 2) bass(t, ch.bass * 2);          // октавный буги-бас
+      if (pos % 4 === 0) kick(t);
+      if (pos === 4 || pos === 12) snare(t);
+      if (pos === 7 || pos === 15) stab(t, ch.bass * 2); // «аккорды рояля» в верхнем регистре
+      if (pos % 2 === 0) hat(t, 0.04);
+    },
+  },
+  { // гранж: чистые переборы в куплете, грязные power-stab'ы в припеве — тихое/громкое
+    title: "Smells Like Nonce Spirit (qop=auth Acoustic)", bpm: 118, meter: 16, swing: false, loops: 5,
+    chords: [
+      { bass: 87.31, pad: [174.61, 207.65, 261.63] },  // Fm
+      { bass: 87.31, pad: [174.61, 207.65, 261.63] },  // Fm
+      { bass: 69.30, pad: [138.59, 174.61, 207.65] },  // Db
+      { bass: 69.30, pad: [138.59, 174.61, 207.65] },  // Db
+    ],
+    pattern(t, s, pos, bar, ch, tr) {
+      const chorus = bar >= 2;                 // такты 1–2 — чисто, 3–4 — на-drive
+      if (pos % 2 === 0) {
+        if (chorus) stab(t, ch.bass * 2);
+        else pluck(t, ch.pad[(pos / 2) % 3]);
+      }
+      if (pos % 8 === 0) { kick(t); bass(t, ch.bass); }
+      if (pos === 4 || pos === 12) snare(t);
+      if (chorus && pos % 4 === 2) hat(t, 0.06);
+    },
+  },
+  { // AOR на 100: Am–G–F–E — тот самый «Hotel California»-ход, арпеджио без конца
+    title: "Welcome to the NAT (Check Out Any Time, Never Leave)", bpm: 100, meter: 16, swing: false, loops: 4,
+    chords: [
+      { bass: 110.00, pad: [220.00, 261.63, 329.63] },  // Am
+      { bass: 98.00,  pad: [196.00, 246.94, 293.66] },  // G
+      { bass: 87.31,  pad: [174.61, 220.00, 261.63] },  // F
+      { bass: 82.41,  pad: [164.81, 207.65, 246.94] },  // E
+    ],
+    pattern(t, s, pos, bar, ch, tr) {
+      const ARP = [0, 2, 1, 2];
+      if (pos % 2 === 0) pluck(t, ch.pad[ARP[(pos / 2) % 4]]); // гипнотические восьмые
+      if (pos % 4 === 0) bass(t, ch.bass);
+      if (pos === 0 || pos === 8) kick(t);
+      if (pos === 4 || pos === 12) snare(t);
+      if (pos % 4 === 2) hat(t, 0.05);
+    },
+  },
+  { // кантри-рок на 116 со свингом: восьмые «тоник-квинта» и дребезжащие pluck'и
+    title: "Two Tickets to Paradise (Parallel UPDATE)", bpm: 116, meter: 16, swing: true, loops: 5,
+    chords: [
+      { bass: 73.42,  pad: [220.00, 293.66, 369.99] },  // D
+      { bass: 123.47, pad: [246.94, 293.66, 369.99] },  // Bm
+      { bass: 98.00,  pad: [196.00, 246.94, 293.66] },  // G
+      { bass: 110.00, pad: [220.00, 277.18, 329.63] },  // A
+    ],
+    pattern(t, s, pos, bar, ch, tr) {
+      if (pos % 2 === 0) bass(t, pos % 4 === 0 ? ch.bass : ch.bass * 1.5); // тоник/квинта
+      if (pos % 4 === 2) for (const f of ch.pad) pluck(t, f);              // «верхние» удары медиатора
+      if (pos % 4 === 0) kick(t);
+      if (pos === 4 || pos === 12) snare(t);
+    },
+  },
+  { // апбит-фолк-поп на 126: дребезжащие переборы и бубен — «не класть парк в датаграмму»
+    title: "Big Yellow Taxi (Doesn't Fit in One Datagram)", bpm: 126, meter: 16, swing: false, loops: 5,
+    chords: [
+      { bass: 98.00,  pad: [196.00, 246.94, 293.66] },  // G
+      { bass: 65.41,  pad: [196.00, 261.63, 329.63] },  // C
+      { bass: 73.42,  pad: [146.83, 185.00, 220.00] },  // D
+      { bass: 82.41,  pad: [207.65, 246.94, 329.63] },  // E
+    ],
+    pattern(t, s, pos, bar, ch, tr) {
+      const JANGLE = [0, 2, 1, 2, 0, 1, 2, 1];
+      if (pos % 2 === 0) pluck(t, ch.pad[JANGLE[(pos / 2) % 8]]);
+      if (pos === 0 || pos === 8) { kick(t); bass(t, ch.bass); }
+      if (pos === 4 || pos === 12) snare(t);
+      if (pos % 2 === 1) hat(t, 0.03);   // бубен восьмыми
+    },
+  },
+  { // госпел-баллада в 6/8: триольные переборы, разрастающиеся пэды
+    title: "Stay With Me (408 No Reroute)", bpm: 68, meter: 24, swing: false, loops: 3,
+    chords: [
+      { bass: 110.00, pad: [220.00, 261.63, 329.63] },  // Am
+      { bass: 87.31,  pad: [174.61, 220.00, 261.63] },  // F
+      { bass: 65.41,  pad: [196.00, 246.94, 329.63] },  // C
+      { bass: 98.00,  pad: [196.00, 246.94, 293.66] },  // G
+    ],
+    pattern(t, s, pos, bar, ch, tr) {
+      if (pos === 0) pad(t, ch.pad, tr.stepDur * tr.meter * 0.95, 0.05);
+      if (pos % 4 === 0) bass(t, ch.bass);
+      if (pos % 2 === 0) pluck(t, ch.pad[(pos / 2) % 3]); // триольные щипки 6/8
+      if (pos === 6 || pos === 18) hat(t, 0.045);
+    },
+  },
+  { // кантри-тустеп на 96: ходячий бас и pluck-вопрос — пыль на дороге и 481
+    title: "Where My Dialog At? (481 Call/Transaction Does Not Exist)", bpm: 96, meter: 16, swing: true, loops: 5,
+    chords: [
+      { bass: 110.00, walk: [110.00, 98.00, 87.31, 82.41],  pad: [220.00, 261.63, 329.63] },  // Am, вниз
+      { bass: 65.41,  walk: [65.41, 73.42, 82.41, 98.00],   pad: [196.00, 261.63, 329.63] },  // C, вверх
+      { bass: 87.31,  walk: [87.31, 98.00, 110.00, 123.47], pad: [174.61, 220.00, 261.63] },  // F
+      { bass: 98.00,  walk: [98.00, 87.31, 73.42, 61.74],   pad: [196.00, 246.94, 392.00] },  // G
+    ],
+    pattern(t, s, pos, bar, ch, tr) {
+      if (pos % 4 === 0) bass(t, ch.walk[pos / 4]); // ровные четверти, как у Мартина
+      if (pos === 2 || pos === 10) pluck(t, ch.pad[1]); // «where my dialog at?»
+      if (pos === 0 || pos === 8) kick(t);
+      if (pos % 4 === 2) hat(t, 0.04);
+    },
+  },
+  { // хип-хоп на 115: двужильный бас-риф (привет «Under Pressure»), бум-бэп, «стоп» в 4-м такте
+    title: "Ice Ice Baby (Check Is ICE, Not RTP)", bpm: 115, meter: 16, swing: false, loops: 6,
+    chords: [
+      { bass: 110.00 },  // Am
+      { bass: 87.31 },   // F
+      { bass: 65.41 },   // C
+      { bass: 98.00 },   // G
+    ],
+    pattern(t, s, pos, bar, ch, tr) {
+      for (const p of [0, 3, 6, 8, 11]) if (pos === p) bass(t, p === 6 ? ch.bass * 1.5 : ch.bass);
+      if (pos % 8 === 0) kick(t);
+      if (pos === 4 || pos === 12) snare(t);
+      if (pos % 4 === 2) hat(t, 0.045);
+      if (bar === 3 && pos % 4 === 0) stab(t, ch.bass * 2); // «хрэ-хрэ»: группа бьёт в унисон
+    },
+  },
+  { // соул-фанк на 108: клавинетные staccato на синкопах — «иди к реке, там 302»
+    title: "Take Me to the River (302, Transit Edit)", bpm: 108, meter: 16, swing: false, loops: 6,
+    chords: [
+      { bass: 65.41,  pad: [261.63, 329.63, 392.00] },  // C
+      { bass: 87.31,  pad: [174.61, 220.00, 261.63] },  // F
+      { bass: 98.00,  pad: [196.00, 246.94, 293.66] },  // G
+      { bass: 87.31,  pad: [174.61, 220.00, 261.63] },  // F
+    ],
+    pattern(t, s, pos, bar, ch, tr) {
+      const STABS = { 3: 0, 6: 1, 10: 2, 13: 0 }; // клавинет на синкопах
+      if (pos in STABS) pluck(t, ch.pad[STABS[pos]]);
+      if (pos === 0 || pos === 6) kick(t);
+      if (pos === 0 || pos === 8) bass(t, ch.bass);
+      if (pos === 4 || pos === 12) snare(t);
+      if (pos % 2 === 1) hat(t, 0.035);
+    },
+  },
+];
+let actx = null, master = null, analyser = null, noiseBuf = null, rainBuf = null;
+// «Объём» — только лёгкий стерео-пан на перкуссию (feedback-delay убран).
+// Выключен: всё звучит ровно как было — сухой mono.
+let hatFlip = false; // хэты перекачивают из уха в ухо
+let spaceOn = !!saved.space;
+// musicOn — «музыка не заглушена». Не путать с actx.state === "running": контекст
+// может быть поднят только амбиентом, и тогда по state не отличить тишину от дождя.
+let musicOn = false;
+let schedTimer = null, nextT = 0, step = 0;
+let cur = null, curIdx = 0, loopsDone = 0;
+let volume = num(saved.vol, 0, 1, 0.5); // применяется при создании master; ползунок в шапке
+let tempoScale = num(saved.tempo, 0.5, 1.5, 1); // множитель темпа; ползунок в шапке
+const BASE_TITLE = document.title;    // вкладка показывает дорожку, пока играет
+
+function makeNoise() { // общий буфер белого шума для перкуссии
+  noiseBuf = actx.createBuffer(1, actx.sampleRate, actx.sampleRate);
+  const d = noiseBuf.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+}
+function env(t, peak, attack, decay) { // резкая атака, экспоненциальный спад
+  const g = actx.createGain();
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(peak, t + attack);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + attack + decay);
+  return g;
+}
+// Точка подключения перкуссии: без «объёма» — прямо в master (mono, как было),
+// с «объёмом» — свой стерео-пан на каждый удар: лёгкая ширина без новых файлов.
+function percIn(pan) {
+  if (!spaceOn) return master;
+  const p = actx.createStereoPanner();
+  p.pan.value = pan;
+  p.connect(master);
+  return p;
+}
+function kick(t) {
+  const o = actx.createOscillator(), g = env(t, 0.9, 0.005, 0.3);
+  o.frequency.setValueAtTime(150, t);
+  o.frequency.exponentialRampToValueAtTime(42, t + 0.12);
+  o.connect(g).connect(percIn(0)); // бочка — всегда по центру
+  o.start(t); o.stop(t + 0.35);
+}
+function bass(t, f) {
+  const o = actx.createOscillator(), g = env(t, 0.35, 0.01, 0.25);
+  o.type = "sine"; o.frequency.value = f;
+  o.connect(g).connect(master); // бас — мимо пана: низ держим строго в центре
+  o.start(t); o.stop(t + 0.3);
+}
+function snare(t) {
+  const d = percIn(0.25); // рабочий чуть правее центра — та самая лёгкая ширина
+  const s = actx.createBufferSource(), g = env(t, 0.3, 0.002, 0.16);
+  const bp = actx.createBiquadFilter();
+  s.buffer = noiseBuf; bp.type = "bandpass"; bp.frequency.value = 1800; bp.Q.value = 0.7;
+  s.connect(bp).connect(g).connect(d);
+  s.start(t); s.stop(t + 0.2);
+  const o = actx.createOscillator(), g2 = env(t, 0.25, 0.002, 0.08); // тональное тело
+  o.type = "triangle"; o.frequency.value = 180;
+  o.connect(g2).connect(d);
+  o.start(t); o.stop(t + 0.1);
+}
+function hat(t, v) {
+  const s = actx.createBufferSource(), g = env(t, v, 0.001, v > 0.06 ? 0.09 : 0.03);
+  const hp = actx.createBiquadFilter();
+  s.buffer = noiseBuf; s.playbackRate.value = 1.7;
+  hp.type = "highpass"; hp.frequency.value = 7000;
+  s.connect(hp).connect(g).connect(percIn(hatFlip ? 0.35 : -0.35)); // хэты перекачивают из уха в ухо
+  hatFlip = !hatFlip;
+  s.start(t); s.stop(t + 0.15);
+}
+function pad(t, freqs, dur, peak = 0.06) { // джазовый пэд: расстроенные двойники через лей-пас
+  const lp = actx.createBiquadFilter();
+  lp.type = "lowpass"; lp.frequency.value = 900;
+  const g = actx.createGain();
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(peak, t + 0.4);
+  g.gain.setValueAtTime(peak, t + dur * 0.7);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  lp.connect(g).connect(master);
+  for (const f of freqs) for (const det of [-3, 3]) {
+    const o = actx.createOscillator();
+    o.type = "triangle"; o.frequency.value = f; o.detune.value = det;
+    o.connect(lp); o.start(t); o.stop(t + dur + 0.05);
+  }
+}
+function pluck(t, f) { // приглушённая медиаторная нота для баллады
+  const o = actx.createOscillator(), lp = actx.createBiquadFilter(), g = env(t, 0.14, 0.004, 0.5);
+  o.type = "triangle"; o.frequency.value = f;
+  lp.type = "lowpass"; lp.frequency.value = 1400;
+  o.connect(lp).connect(g).connect(master);
+  o.start(t); o.stop(t + 0.6);
+}
+function ring(t) { // телефонные гудки 440+480 Гц, короткие — «Ringin' 180»
+  for (const f of [440, 480]) {
+    const o = actx.createOscillator(), g = env(t, 0.1, 0.004, 0.18);
+    o.type = "sine"; o.frequency.value = f;
+    o.connect(g).connect(master);
+    o.start(t); o.stop(t + 0.2);
+  }
+}
+function stab(t, f) { // «гитарный» бой: расстроенный saw-двойник с квинтой — power chord
+  const lp = actx.createBiquadFilter();
+  lp.type = "lowpass"; lp.frequency.value = 1600;
+  const g = env(t, 0.11, 0.004, 0.16);
+  for (const [m, det] of [[1, -5], [1.5, 5]]) {
+    const o = actx.createOscillator();
+    o.type = "sawtooth"; o.frequency.value = f * m; o.detune.value = det;
+    o.connect(lp); o.start(t); o.stop(t + 0.22);
+  }
+  lp.connect(g).connect(master);
+}
+function scheduleNote(t) { // обвязка звука: нота всплывает ко времени её звучания,
+  setTimeout(spawnNote, Math.max(0, (t - actx.currentTime) * 1000)); // а не в момент планирования
+}
+function scheduleStep(s, t) {
+  const pos = s % cur.meter, bar = (s / cur.meter) | 0;
+  const ch = cur.chords[bar % cur.chords.length];
+  cur.pattern(cur.swing && pos % 2 === 1 ? t + cur.stepDur * 0.15 : t, s, pos, bar, ch, cur);
+}
+let shuffle = false;
+function nextIdx() { // следующий трек: в перемешке — случайный, не повторяющий текущий
+  if (!shuffle || PLAYLIST.length < 2) return curIdx + 1;
+  let n;
+  do { n = Math.floor(Math.random() * PLAYLIST.length); } while (n === curIdx);
+  return n;
+}
+function setTrack(i, announce) {
+  curIdx = i % PLAYLIST.length;
+  cur = PLAYLIST[curIdx];
+  applyTempo(); // stepDur и «кивок» — от BPM дорожки с множителем темпа
+  cur.loopLen = cur.meter * cur.chords.length;    // цикл = полный проход прогрессии
+  step = 0; loopsDone = 0;
+  highlightTrack();
+  lastTrack = curIdx;
+  saveState();
+  if (announce) announceTrack();
+}
+function scheduler() {
+  if (!musicOn || !actx || actx.state !== "running") return;
+  // В скрытой вкладке setInterval троттлится до ~1 Гц: планируем с запасом,
+  // переживающим паузу между тиками, — музыка играет и без фокуса.
+  const ahead = document.hidden ? 1.6 : LOOKAHEAD;
+  if (nextT < actx.currentTime) nextT = actx.currentTime + 0.06; // после паузы — не лавиной
+  while (nextT < actx.currentTime + ahead) {
+    // авто-переключение только на границе цикла — посреди такта трек не рвём
+    if (step === 0 && loopsDone >= cur.loops) setTrack(nextIdx(), true);
+    scheduleStep(step, nextT);
+    if (step % 4 === 0) scheduleNote(nextT); // визуализация «четвертей» — в такт музыке
+    nextT += cur.stepDur;
+    if (++step >= cur.loopLen) { step = 0; loopsDone++; }
+  }
+}
+// Прогресс играющей дорожки: прогресс-бар + сколько секунд до следующего трека.
+// Планировщик бежит впереди аудио-часов (lookahead), поэтому позицию считаем от
+// actx.currentTime, а не от наивного step. Ритм — тот же, что у шкалы вайба.
+const tpEl = document.getElementById("trackprogress");
+const TP_N = 22;
+function tickProgress() {
+  if (!musicOn || !cur || !actx || actx.state !== "running") { tpEl.textContent = ""; return; }
+  const la = (nextT - actx.currentTime) / cur.stepDur;                     // глубина планирования, в шагах
+  const inLoop = (((step - la) % cur.loopLen) + cur.loopLen) % cur.loopLen; // дробная позиция внутри прогона
+  const frac = Math.min(1, (loopsDone * cur.loopLen + inLoop) / (cur.loops * cur.loopLen));
+  const left = Math.round(((cur.loops - loopsDone) * cur.loopLen - inLoop) * cur.stepDur);
+  const filled = Math.round(frac * TP_N);
+  tpEl.textContent = "▓".repeat(filled) + "░".repeat(TP_N - filled) + " · "
+    + (left > 2 ? "осталось ~" + left + " с" : "переключаюсь…");
+}
+// «Now playing»: реальная играющая дорожка показываем с фейдом и не перебиваем тикером.
+function showNowPlaying(text) {
+  np.style.opacity = 0;
+  clearTimeout(npFade);
+  npFade = setTimeout(() => { np.textContent = text; np.style.opacity = 1; npFade = null; }, 350);
+}
+function announceTrack() {
+  showNowPlaying("▶ " + cur.title + "  [synth " + (curIdx + 1) + "/" + PLAYLIST.length + "]");
+  if (musicOn) document.title = "▶ " + cur.title; // вкладка — за дорожкой
+}
+// Панель выбора дорожек: кнопки 1–N, текущая подсвечена, title — название трека.
+const trackbar = document.getElementById("trackbar");
+PLAYLIST.forEach((tr, i) => {
+  const b = document.createElement("button");
+  b.textContent = i + 1;
+  b.title = tr.title;
+  b.addEventListener("click", () => selectTrack(i));
+  trackbar.appendChild(b);
+});
+function highlightTrack() {
+  for (const [i, b] of [...trackbar.children].entries()) b.classList.toggle("on", i === curIdx);
+}
+function selectTrack(i) {
+  if (musicOn) setTrack(i, true); // играет — переключаем на месте
+  else startMusic(i);             // тишина (или один амбиент) — включаем сразу с этого трека
+}
+// ─── Амбиент: дождь + потрескивание винила ───
+// Отдельный слой, у дождя свой буфер розового шума (rainBuf). Подключён к master
+// через свой gain: громкость ползунком и общий mute работают и на него. Кнопка/хоткей A.
+const ambBtn = document.getElementById("ambbtn");
+const AMBIENT_LEVEL = 0.35; // громкость слоя амбиента (дождь + винил) относительно master
+let ambOn = false, ambGain = null, ambTimer = null;
+function ensureAudio() {
+  if (actx) return;
+  actx = new (window.AudioContext || window.webkitAudioContext)();
+  makeNoise();
+  master = actx.createGain(); master.gain.value = volume;
+  const lofi = actx.createBiquadFilter(); // приглушаем верха — «подлофичение»
+  lofi.type = "lowpass"; lofi.frequency.value = 2500;
+  analyser = actx.createAnalyser(); analyser.fftSize = 128;
+  master.connect(lofi).connect(analyser).connect(actx.destination);
+  buildAmbient();
+}
+function makeRainNoise() { // свой буфер для дождя: РОЗОВЫЙ шум (Kellet), stereo
+  // Белый шум за фильтром звучит «шидением фена». Розовый (-3 дБ/окта) — с
+  // запасом низов и без ВЧ-песка, на слух воспринимается как «ливень», а не «шум».
+  const len = actx.sampleRate * 4; // 4 с, дальше — незаметная петля
+  rainBuf = actx.createBuffer(2, len, actx.sampleRate); // независимые каналы → ширина
+  for (let ch = 0; ch < 2; ch++) {
+    const d = rainBuf.getChannelData(ch);
+    let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
+    for (let i = 0; i < len; i++) {
+      const w = Math.random() * 2 - 1;
+      b0 = 0.99886 * b0 + w * 0.0555179; b1 = 0.99332 * b1 + w * 0.0750759;
+      b2 = 0.96900 * b2 + w * 0.1538520; b3 = 0.86650 * b3 + w * 0.3104856;
+      b4 = 0.55000 * b4 + w * 0.5329522; b5 = -0.7616 * b5 - w * 0.0168980;
+      d[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + w * 0.5362) * 0.11;
+      b6 = w * 0.115926;
+    }
+  }
+}
+function buildAmbient() {
+  ambGain = actx.createGain(); ambGain.gain.value = 0; // ферма слоя: 0 — выключен
+  ambGain.connect(master);
+  makeRainNoise();
+  // «Шелест»: розовый шум за широким ФВЧ/ФНЧ; «порывы ветра» — LFO по срезу ФНЧ
+  const hiss = actx.createBufferSource();
+  hiss.buffer = rainBuf; hiss.loop = true;
+  const hp = actx.createBiquadFilter(); hp.type = "highpass"; hp.frequency.value = 200;
+  const lp = actx.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 2600;
+  const lfo = actx.createOscillator(); lfo.frequency.value = 0.05; // один «порыв» секунд на 20
+  const lfoAmp = actx.createGain(); lfoAmp.gain.value = 800;
+  lfo.connect(lfoAmp).connect(lp.frequency);
+  const hissG = actx.createGain(); hissG.gain.value = 1.0;
+  hiss.connect(hp).connect(lp).connect(hissG).connect(ambGain);
+  // «Гул ливня вдалеке»: тот же шум за глубоким ФНЧ — даёт телу дождя низы
+  const rumble = actx.createBufferSource();
+  rumble.buffer = rainBuf; rumble.loop = true;
+  const lp2 = actx.createBiquadFilter(); lp2.type = "lowpass"; lp2.frequency.value = 400;
+  const rumbleG = actx.createGain(); rumbleG.gain.value = 0.8;
+  rumble.connect(lp2).connect(rumbleG).connect(ambGain);
+  hiss.start(); rumble.start(); lfo.start();
+}
+function cracklePop(t) { // виниловый «щелчок»: короткий ВЧ-всплеск шума
+  const s = actx.createBufferSource(), g = actx.createGain(), hp = actx.createBiquadFilter();
+  s.buffer = noiseBuf; s.playbackRate.value = 2.5;
+  hp.type = "highpass"; hp.frequency.value = 2000;
+  g.gain.setValueAtTime(0.015 + Math.random() * 0.03, t);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + 0.03);
+  s.connect(hp).connect(g).connect(ambGain);
+  s.start(t); s.stop(t + 0.05);
+}
+function rainDrop(t) { // отдельная капля: короткий узкополосный «шлёп» вразброс по стерео
+  const s = actx.createBufferSource(), g = actx.createGain(), bp = actx.createBiquadFilter();
+  s.buffer = noiseBuf; s.playbackRate.value = 0.8 + Math.random() * 1.4;
+  bp.type = "bandpass"; bp.Q.value = 2 + Math.random() * 9;
+  bp.frequency.value = 400 + Math.random() * Math.random() * 4200; // чаще — высокие «пеньканья»
+  const pan = actx.createStereoPanner(); pan.pan.value = Math.random() * 2 - 1;
+  g.gain.setValueAtTime(0.004 + Math.random() * 0.05, t);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + 0.02 + Math.random() * 0.1);
+  s.connect(bp).connect(g).connect(pan).connect(ambGain);
+  s.start(t); s.stop(t + 0.15);
+}
+function schedAmbTick() { // тик амбиента: винил-щелчки + капли; в паузе/тишине — молчим
+  if (!ambOn || !actx || actx.state !== "running") return;
+  const t = actx.currentTime + 0.03;
+  if (Math.random() < 0.22) cracklePop(t);
+  if (Math.random() < 0.03) cracklePop(t); // иногда — двойной щелчок, как на настоящей пластинке
+  const n = 1 + Math.floor(Math.random() * 4); // ~10–55 капель/с — текстура «по подоконнику»
+  for (let i = 0; i < n; i++) rainDrop(t + Math.random() * 0.09);
+}
+function updateAmbBtn() {
+  ambBtn.classList.toggle("on", ambOn);
+  ambBtn.textContent = ambOn ? "🌧 дождь" : "🌧 эмбиент";
+}
+function startAmbient() {
+  ensureAudio();
+  ambOn = true; ambWanted = true;
+  actx.resume().then(() => ambGain.gain.setTargetAtTime(AMBIENT_LEVEL, actx.currentTime, 0.15)); // фейд-ин ~0.5 с
+  ambTimer = setInterval(schedAmbTick, 90);
+  updateAmbBtn(); saveState();
+}
+function stopAmbient() {
+  ambOn = false; ambWanted = false;
+  if (ambGain && actx) ambGain.gain.setTargetAtTime(0, actx.currentTime, 0.15);      // фейд-аут
+  clearInterval(ambTimer);
+  // как и музыка: если после выключения играть нечему — глушим контекст с запасом на фейд-аут
+  if (!musicOn) setTimeout(() => { if (!ambOn && !musicOn && actx) actx.suspend(); }, 800);
+  updateAmbBtn(); saveState();
+}
+ambBtn.addEventListener("click", () => ambOn ? stopAmbient() : startAmbient());
+
+// ─── Переключатель «объёма» (D) ───
+// По умолчанию мелодии звучат как были (сухой mono). Кнопка включает лёгкий
+// стерео-пан перкуссии: пан-ноузы создаются на каждый новый удар, поэтому
+// переключение на лету подхватывается со следующего запланированного удара.
+const spaceBtn = document.getElementById("spacebtn");
+function updateSpaceBtn() { spaceBtn.classList.toggle("on", spaceOn); }
+function toggleSpace() {
+  spaceOn = !spaceOn;
+  updateSpaceBtn();
+  saveState();
+}
+spaceBtn.addEventListener("click", toggleSpace);
+updateSpaceBtn(); // состояние из памяти (или выключено при первом заходе)
+
+const muteBtn = document.getElementById("mutebtn");
+function updateMuteBtn() {
+  const on = musicOn; // кнопка — про музыку; контекст может держать только амбиент
+  muteBtn.textContent = on ? "🔊 вайб" : "🔇 тишина";
+  muteBtn.classList.toggle("on", !!on);
+  document.title = on && cur ? "▶ " + cur.title : BASE_TITLE; // заглушка — при остановке
+  vibeWanted = !!on; // реальное «заиграло/заглушили» — что и переживёт перезагрузку
+  saveState();
+}
+function startMusic(startIdx) {
+  ensureAudio(); // контекст мог быть поднят одним амбиентом — переиспользуем
+  if (!musicOn) {
+    if (!schedTimer) schedTimer = setInterval(scheduler, 25);
+    musicOn = true;
+    // включили вайб — стартуем с сохранённой дорожки (при первом заходе — со случайной);
+    // startIdx (кнопки 1–N, n/p, ⏮/⏭) точнее памяти
+    setTrack(startIdx != null ? startIdx : num(lastTrack, 0, PLAYLIST.length - 1, Math.floor(Math.random() * PLAYLIST.length)), false);
+  } else if (startIdx != null) {
+    setTrack(startIdx, false); // переключение на выбранном треке
+  }
+  // и при первом старте, и после unmute — показать, что реально играет
+  actx.resume().then(() => { updateMuteBtn(); announceTrack(); });
+  nextT = actx.currentTime + 0.06;
+}
+function stopMusic() {
+  // музыку выключаем выключением планировщика, а не suspend'ом: контекст мог
+  // принадлежать не только ей. Уже запланированные ноты доиграют ~0.1 с хвост.
+  musicOn = false;
+  if (schedTimer) { clearInterval(schedTimer); schedTimer = null; }
+  updateMuteBtn();
+  // если контекст больше нечем занять — глушим через паузу, но с запасом,
+  // чтобы не заморозить хвосты нот посреди затухания
+  if (!ambOn) setTimeout(() => { if (!musicOn && !ambOn && actx) actx.suspend(); }, 800);
+}
+function toggleVibe() { musicOn ? stopMusic() : startMusic(); }
+muteBtn.addEventListener("click", toggleVibe);
+
+// Транспорт: ⏮ ⏭ по плейлисту, 🔀 — после конца трека играть случайный.
+const shuffleBtn = document.getElementById("shufflebtn");
+function toggleShuffle() {
+  shuffle = !shuffle;
+  shuffleBtn.classList.toggle("on", shuffle);
+  saveState();
+}
+document.getElementById("prevbtn").addEventListener("click", () => selectTrack(curIdx - 1 + PLAYLIST.length));
+document.getElementById("nextbtn").addEventListener("click", () => selectTrack(nextIdx()));
+shuffleBtn.addEventListener("click", toggleShuffle);
+
+// Громкость: ползунок в шапке и стрелки ↑/↓. До создания контекста просто помним.
+const volEl = document.getElementById("vol");
+function setVolume(v) {
+  volume = Math.min(1, Math.max(0, v));
+  volEl.value = volume;
+  if (master) master.gain.value = volume;
+  saveState();
+}
+volEl.addEventListener("input", () => setVolume(+volEl.value));
+
+// Темп: ползунок-множитель к BPM дорожки (×0.5–×1.5). Длины всех нот вычисляются
+// из cur.stepDur, а планировщик читает его на каждом шаге — темп меняется на лету,
+// с следующего шага сетки, не ломая ритм и пропорции трека.
+const tempoEl = document.getElementById("tempo");
+const tempoVal = document.getElementById("tempoval");
+function applyTempo() {
+  cur.stepDur = 60 / (cur.bpm * tempoScale) / 4;
+  coder.style.animationDuration = (120 / (cur.bpm * tempoScale)) + "s"; // кивок — тоже в такт
+}
+function setTempo(v) {
+  tempoScale = Math.min(1.5, Math.max(0.5, v));
+  tempoEl.value = tempoScale;
+  tempoVal.textContent = "×" + (+tempoScale.toFixed(2));
+  if (cur) applyTempo(); // играет — со следующего шага; не играет — применится в setTrack
+  saveState();
+}
+tempoEl.addEventListener("input", () => setTempo(+tempoEl.value));
+
+// Хоткеи. Буквы — в обеих раскладках; Space на фокусной кнопке не двойнит
+// (preventDefault убирает штатную активацию пробелом).
+document.addEventListener("keydown", (e) => {
+  if (e.target.matches("input, textarea, select")) return; // не воровать ввод у форм
+  if (dimmed) { undim(); return; }  // в темноте любая клавиша — «включить свет»
+  if (vimWq(e.key)) return;         // человек печатает :wq — не активировать прочие хоткеи
+  if (e.code === "Space") { e.preventDefault(); toggleVibe(); }
+  else if (e.key === "ArrowRight") nextArt();
+  else if (e.key === "ArrowLeft") prevArt();
+  else if (e.key === "ArrowUp") { e.preventDefault(); setVolume(volume + 0.1); }
+  else if (e.key === "ArrowDown") { e.preventDefault(); setVolume(volume - 0.1); }
+  else if (e.key === "n" || e.key === "т") selectTrack(nextIdx());
+  else if (e.key === "p" || e.key === "з") selectTrack(curIdx - 1 + PLAYLIST.length);
+  else if (e.key === "s" || e.key === "ы") toggleShuffle();
+  else if (e.key === "a" || e.key === "ф") ambOn ? stopAmbient() : startAmbient();
+  else if (e.key === "d" || e.key === "в") toggleSpace();
+  else if (e.key === "b" || e.key === "и") playBye();
+  else if (/^[1-9]$/.test(e.key)) selectTrack(+e.key - 1);
+  else if (e.key === "0") selectTrack(9); // 1–0 — дорожки 1–10, остальные — кнопками
+});
+
+// ─── Восстановление сохранённого вайба ───
+volEl.value = volume;                    // ползунок — с сохранённой громкостью (до создания master)
+tempoEl.value = tempoScale;              // то же для темпа: только значение, без saveState
+tempoVal.textContent = "×" + (+tempoScale.toFixed(2));
+shuffle = !!saved.shuffle;
+shuffleBtn.classList.toggle("on", shuffle);
+showArt(false);                          // первый рендер арта — всё состояние уже инициализировано
+if (vibeWanted || ambWanted) {
+  // перед перезагрузкой играло что-то из этого, но автозвук без жеста запрещён браузером:
+  // дождёмся первого касания/клавиши и продолжим. Проверки !musicOn/!ambOn — если жест уже
+  // запустил что-то сам (кодер, Space), не дублируем; клики по самим кнопкам-переключателям
+  // пропускаем — их собственный обработчик отработает точнее.
+  const kick = (e) => {
+    document.removeEventListener("pointerdown", kick);
+    document.removeEventListener("keydown", kick);
+    const hit = (sel) => e.target && e.target.closest && e.target.closest(sel);
+    if (vibeWanted && !musicOn && !hit("#mutebtn")) startMusic();
+    if (ambWanted && !ambOn && !hit("#ambbtn")) startAmbient();
+  };
+  document.addEventListener("pointerdown", kick);
+  document.addEventListener("keydown", kick);
+}
+
+// Всплывающие ноты из наушников.
+const NOTES = ["♪", "♫", "♬", "♩"];
+function spawnNote() {
+  // проверяем на каждом спавне: и OS-настройку уважаем, и CSS-запасной вариант не течёт лишними узлами
+  if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  if (document.hidden || dimmed) return; // в невидимой вкладке и в темноте нотам нечего рисовать
+  const n = document.createElement("span");
+  n.className = "note";
+  n.textContent = NOTES[Math.floor(Math.random() * NOTES.length)];
+  // старт от чашек наушников (примерно 18% и 82% ширины)
+  const side = Math.random() < 0.5 ? 0.14 : 0.78;
+  n.style.left = Math.round((side + Math.random() * 0.08) * stage.clientWidth) + "px";
+  n.style.top = Math.round(stage.clientHeight * 0.42) + "px";
+  stage.appendChild(n);
+  n.addEventListener("animationend", () => n.remove());
+}
+// В тишине ноты летят вслепую; когда музыка играет — планировщик привязывает
+// их к сетке трека (scheduleNote), и слепому таймеру здесь делать нечего.
+setInterval(() => { if (!musicOn) spawnNote(); }, 700);
+
+// Пасхалка: долгое нажатие на кодер проигрывает установление вайб-сессии —
+// тот же SIP-диалог, что у нормальных тестов, только a=vibes.
+const SIP_DIALOG = [
+  "A ──────▶ proxy   INVITE sip:bob@pbx.local",
+  "proxy ──▶ A       100 Trying",
+  "proxy ──▶ B       INVITE sip:bob@pbx.local",
+  "B ──────▶ proxy   100 Trying",
+  "B ──────▶ proxy   180 Ringing",
+  "proxy ──▶ A       180 Ringing",
+  "B ──────▶ proxy   200 OK",
+  "proxy ──▶ A       200 OK  (a=vibes: sendrecv)",
+  "A ──────▶ proxy   ACK",
+  "proxy ──▶ B       ACK",
+  "        ── вайб установлен ──",
+];
+const dlg = document.createElement("pre");
+dlg.id = "dialog";
+dlg.hidden = true;
+stage.appendChild(dlg);
+let eggBusy = false, holdTimer = null;
+function playSip(lines, onEnd) { // печатает диалог построчно, потом прячет и зовёт onEnd
+  eggBusy = true;
+  dlg.hidden = false;
+  dlg.textContent = "";
+  lines.forEach((line, i) => setTimeout(() => { dlg.textContent += (i ? "\n" : "") + line; }, 380 * i));
+  setTimeout(() => { dlg.hidden = true; eggBusy = false; if (onEnd) onEnd(); }, 380 * lines.length + 2200);
+}
+function playDialog() { playSip(SIP_DIALOG); }
+
+// BYE: клавиша b (и «и») или vim-жест :wq — сессия корректно сворачивается:
+// диалог завершения, тишина, свет гаснет. Возврат — клик или любая клавиша.
+const BYE_DIALOG = [
+  "A ──────▶ proxy   BYE sip:vibe@sip.local",
+  "proxy ──▶ B       BYE sip:vibe@sip.local",
+  "B ──────▶ proxy   200 OK",
+  "proxy ──▶ B       200 OK",
+  "        ── вайб завершён ──",
+];
+const blackout = document.getElementById("blackout");
+let dimmed = false, vim = "", vimTimer = null;
+function playBye() {
+  if (eggBusy) return; // с установлением вайба не должно быть гонки
+  playSip(BYE_DIALOG, dimOut);
+}
+function vimWq(k) { // посимвольный детектор «:wq» с таймаутом, чтобы случайные w/q не срабатывали
+  clearTimeout(vimTimer);
+  if (k === ":") vim = ":";
+  else if (vim === ":" && k === "w") vim = ":w";
+  else if (vim === ":w" && k === "q") { vim = ""; playBye(); return true; }
+  else vim = "";
+  vimTimer = setTimeout(() => { vim = ""; }, 1500);
+  return false;
+}
+function dimOut() {
+  dimmed = true;
+  stopMusic(); stopAmbient(); // «тишина» — и намерение выключить тоже пишется в память
+  blackout.classList.add("on");
+  blackout.addEventListener("click", undim, { once: true });
+}
+function undim() {
+  if (!dimmed) return;
+  dimmed = false;
+  blackout.classList.remove("on");
+  blackout.removeEventListener("click", undim); // если вернули клавишей — клик-слушатель долой
+}
+stage.addEventListener("pointerdown", () => { holdTimer = setTimeout(playDialog, 600); });
+for (const ev of ["pointerup", "pointerleave", "pointercancel"]) {
+  stage.addEventListener(ev, () => clearTimeout(holdTimer)); // отпустил/увёл курсор раньше — это обычный клик
+}
+
+// Эквалайзер: случайное блуждание высот.
+const EQ_LEVELS = ["▁", "▃", "▅", "▇", "█"];
+const EQ_N = 36;
+let eqH = Array.from({ length: EQ_N }, () => Math.floor(Math.random() * 5));
+const eqEl = document.getElementById("eq");
+const eqData = new Uint8Array(64);
+function tickEq() {
+  if (actx && actx.state === "running" && analyser) {
+    // музыка играет — столбики берутся из живого спектра (низкая половина бинов)
+    analyser.getByteFrequencyData(eqData);
+    eqH = eqH.map((_, i) => {
+      const v = eqData[1 + Math.floor(i * 48 / EQ_N)] / 255;
+      return Math.max(0, Math.min(4, Math.round(v * 4)));
+    });
+  } else {
+    // тишина — случайное блуждание, чтобы стенд не выглядел мёртвым
+    eqH = eqH.map((h) => {
+      let v = h + (Math.floor(Math.random() * 3) - 1);
+      if (Math.random() < 0.12) v = 4; // иногда вспышка баса
+      return Math.max(0, Math.min(4, v));
+    });
+  }
+  eqEl.textContent = eqH.map((h) => EQ_LEVELS[h]).join("");
+  // шкала вайба и прогресс — не стрелки осциллографа: раз в ~0.5 с, иначе мечется
+  if (++vmDivider % 3 === 0) { tickVibe(); tickProgress(); }
+}
+
+// Индикатор уровня вайба: RMS по временной области анализатора (считается после
+// мастер-гейна — значит, ползунок и заглушение честно влияют на «сколько вайба»).
+// Сглаживание EMA, чтобы проценты не прыгали с каждым тактом.
+const vmEl = document.getElementById("vibemeter");
+let tdBuf = null, vibeLevel = 0, vmDivider = 0;
+const vmLabel = (p) =>
+  p < 8 ? "спит" : p < 20 ? "шевелится" : p < 35 ? "настраивается"
+  : p < 55 ? "покачивает" : p < 75 ? "вайб ловится" : p < 90 ? "отличный вайб" : "НЕВЕРОЯТНЫЙ ВАЙБ";
+function tickVibe() {
+  let target;
+  if (actx && actx.state === "running" && analyser) {
+    if (!tdBuf || tdBuf.length !== analyser.fftSize) tdBuf = new Uint8Array(analyser.fftSize);
+    analyser.getByteTimeDomainData(tdBuf);
+    let s = 0;
+    for (let i = 0; i < tdBuf.length; i++) { const d = (tdBuf[i] - 128) / 128; s += d * d; }
+    // Синтез негромкий, а снимок анализатора — всего ~3 мс: между бита RMS проваливается,
+    // поэтому щедрая шкала ×520, а провалы доигрывают огибающей и нижним порогом.
+    target = Math.min(100, Math.round(Math.sqrt(s / tdBuf.length) * 520));
+    // Играющая на слышимой громкости музыка вайб не «спит» — полка 25%
+    if (musicOn && volume > 0) target = Math.max(target, 25);
+  } else {
+    target = 2 + Math.random() * 5; // тишина: вайб лишь едва теплится
+  }
+  // Огибающая живого VU-метра на медленном цоколе: подъём за ~2 такта,
+  // спад ~20 с — шкала обещает, что вайб никуда не делся
+  vibeLevel += (target - vibeLevel) * (target > vibeLevel ? 0.4 : 0.07);
+  const p = Math.round(vibeLevel);
+  const filled = Math.round(p / 10);
+  vmEl.textContent = "вайб: " + "▓".repeat(filled) + "░".repeat(10 - filled) + " " + p + "% — " + vmLabel(p);
+  vmEl.style.color = p >= 75 ? "var(--warn)" : p >= 35 ? "var(--ok)" : "var(--muted)";
+}
+setInterval(tickEq, 180);
+tickEq();
+
+// Тикер режима тишины: раньше TRACKS был декоративным списком названий «на
+// вырост»; теперь все они синтезируются по-настоящему, так что тикер просто
+// листает заголовки PLAYLIST.
+const np = document.getElementById("nowplaying");
+let npFade = null;
+let jokeIdx = num(lastTrack, 0, PLAYLIST.length - 1, Math.floor(Math.random() * PLAYLIST.length));
+np.textContent = "▶ " + PLAYLIST[jokeIdx].title + "  [∞]";
+setInterval(() => {
+  if (npFade) return;                            // идёт фейд — не перебиваем
+  if (musicOn) return;                           // играет живая дорожка — показываем её
+  jokeIdx = (jokeIdx + 1) % PLAYLIST.length;
+  showNowPlaying("▶ " + PLAYLIST[jokeIdx].title + "  [∞]");
+}, 5200);
+</script>
+</body>
+</html>
